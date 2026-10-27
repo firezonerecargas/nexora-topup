@@ -47,6 +47,7 @@ a{color:#e9b6ff}
 <div id="toast"></div>
 <header><div id="logo"></div><div class="brand">NEXORA TOPUP<small>RECARGAS FREE FIRE</small></div></header>
 <main id="view"></main>
+<button id="botb" onclick="botT()" aria-label="Asistente" style="position:fixed;left:14px;bottom:96px;width:52px;height:52px;border-radius:50%;background:var(--g);font-size:24px;padding:0;z-index:5">🤖</button><div id="botp" class="card" style="display:none;position:fixed;left:12px;right:12px;bottom:158px;max-width:420px;z-index:5;max-height:55vh;overflow:auto"></div>
 <nav id="nav" style="display:none"></nav>
 <script>
 // ====== CONFIGURA ESTO ======
@@ -59,8 +60,8 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const LOGO='<svg viewBox="0 0 64 64"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c084fc"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg)"/><path d="M32 9c9 6 13 16 11 30H21C19 25 23 15 32 9z" fill="#fff"/><circle cx="32" cy="26" r="5" fill="#7c3aed"/><path d="M21 33l-8 10 9-2zM43 33l8 10-9-2z" fill="#f0abfc"/><path d="M27 42h10l-5 14z" fill="#fde68a"/></svg>';
 $('#logo').innerHTML=LOGO;
-const U={cup:'CUP',usdt:'USDT',saldo:'saldo'};
-let me=null,tab='home',mode='login',offers=[],cfg={},sel=null,method='cup',atab='clientes',last=null;
+const U={cup:'CUP',usdt:'USDT',saldo:'saldo',credito:'créditos'};
+let me=null,tab='home',mode='login',offers=[],cfg={},sel=null,method='cup',gm=false,pidv='',atab='clientes',last=null;
 
 function toast(t){const e=$('#toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',3500)}
 const wa=t=>`https://wa.me/${SUPPORT}?text=${encodeURIComponent(t)}`;
@@ -71,10 +72,12 @@ async function loadCfg(){const{data}=await sb.from('settings').select('*');cfg={
 async function render(){
   const v=$('#view'),nav=$('#nav');
   if(!me){nav.style.display='none';return v.innerHTML=authV()}
+  if(me.banned){nav.style.display='none';return v.innerHTML='<div class="card"><h2>Cuenta bloqueada</h2><p class="mu">Contacta al soporte.</p><button class="btn" onclick="logout()">Salir</button></div>'}
   if(!me.verified){nav.style.display='none';return v.innerHTML=verifyV()}
-  const items=[['home','Ofertas'],['orders','Pedidos'],['me','Perfil']];if(me.role==='admin')items.push(['admin','Admin']);
-  nav.style.display='flex';nav.innerHTML=items.map(([k,l])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${l}</button>`).join('');
-  ({home:homeV,orders:ordersV,me:meV,admin:adminV})[tab]()
+  const items=[['home','Principal'],['orders','Pedidos'],['notif','Avisos'],['me','Perfil']];if(me.role==='admin')items.push(['admin','Admin']);
+  nav.style.display='flex';nav.innerHTML=items.map(([k,l])=>`<button data-k="${k}" class="${tab===k?'on':''}" onclick="go('${k}')">${l}</button>`).join('');
+  sb.from('notifications').select('id',{count:'exact',head:true}).eq('user_id',me.id).eq('read',false).then(r=>{const b=nav.querySelector('[data-k=notif]');if(r.count&&b)b.textContent='Avisos ('+r.count+')'});
+  ({home:homeV,orders:ordersV,notif:notifV,me:meV,admin:adminV})[tab]()
 }
 function go(t){tab=t;last=null;render()}
 
@@ -106,62 +109,85 @@ async function verify(){const{data,error}=await sb.rpc('verify_account',{p_code:
 async function logout(){await sb.auth.signOut();me=null;render()}
 
 // ---------- OFERTAS ----------
+const pk=m=>m==='credito'?'price_credits':'price_'+m;
 async function homeV(){
-  if(last){return $('#view').innerHTML=last}
+  if(last)return $('#view').innerHTML=last;
   const[{data}]=await Promise.all([sb.from('offers').select('*').eq('active',true).order('sort').order('id'),loadCfg()]);
   offers=data||[];drawHome()}
 function drawHome(){
-  const o=offers.find(x=>x.id===sel),ms=o?['cup','usdt','saldo'].filter(m=>o['price_'+m]>0):[];
-  if(o&&!ms.includes(method))method=ms[0];
-  $('#view').innerHTML=`<div class="card"><h2 style="margin-top:0">Free Fire · Recarga por ID</h2><label>Player ID</label><input id="pid" inputmode="numeric" placeholder="Introduce tu ID" value="${esc($('#pid')?.value||'')}"></div>
-<h2>Elige tu paquete</h2><div class="grid">${offers.map(x=>`<button class="of ${x.id===sel?'on':''}" onclick="sel=${x.id};drawHome()"><b>${esc(x.name)}</b><span>${x.price_cup>0?x.price_cup+' CUP':x.price_usdt+' USDT'}</span></button>`).join('')||'<p class="mu">No hay ofertas disponibles ahora.</p>'}</div>
-${o?`<h2>Método de pago</h2><div class="row">${['cup','usdt','saldo'].map(m=>`<button class="m ${m===method?'on':''}" ${ms.includes(m)?'':'disabled'} onclick="method='${m}';drawHome()">${U[m].toUpperCase()}</button>`).join('')}</div>
-<button class="btn" onclick="order()">Pagar ${o['price_'+method]} ${U[method]}</button>`:''}`}
-async function order(){const pid=$('#pid').value.trim();if(!/^\d{6,14}$/.test(pid))return toast('Revisa tu Player ID');
-  const{data,error}=await sb.rpc('create_order',{p_offer:sel,p_player:pid,p_method:method});if(error)return toast(error.message);
-  const o=offers.find(x=>x.id===sel),amt=o['price_'+method];
-  const how={cup:`Transfiere ${amt} CUP a la tarjeta <b>${esc(cfg.card)}</b>`,saldo:`Envía ${amt} de saldo móvil al <b>${esc(cfg.mobile)}</b>`,usdt:`Envía ${amt} USDT (BEP20) a <b>${esc(cfg.usdt)}</b>`}[method];
-  last=`<div class="card"><h2 style="margin-top:0">Pedido #${data} creado</h2><p>${esc(o.name)} · ID ${esc(pid)}</p><p style="margin-top:10px">${how}</p>
-<p class="mu" style="margin-top:10px">Después de pagar, envía la captura al soporte con tu número de pedido. Recibirás tus diamantes cuando se confirme el pago.</p>
-<a href="${wa('Hola, pagué el pedido #'+data)}" target="_blank" rel="noopener"><button class="btn ok" style="background:#059669">Enviar captura por WhatsApp</button></a>
-<button class="btn" style="background:#2b2140;box-shadow:none" onclick="go('orders')">Ver mis pedidos</button></div>`;
-  $('#view').innerHTML=last;sel=null}
+  if(!gm)return $('#view').innerHTML=`<h2>Juegos</h2><button class="of" style="width:100%;padding:0;overflow:hidden" onclick="gm=true;drawHome()"><div style="height:140px;background:linear-gradient(135deg,#7c3aed,#ea580c);display:grid;place-items:center;font-size:60px;position:relative">🔥<img src="freefire.jpg" alt="" onerror="this.remove()" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></div><div style="padding:12px"><b>Free Fire</b><div class="mu">Recarga de diamantes por ID</div></div></button>`;
+  const o=offers.find(x=>x.id===sel),ok=o&&o[pk(method)]>0;
+  $('#view').innerHTML=`<button class="sm" onclick="gm=false;sel=null;drawHome()">← Juegos</button><h2>Método de pago</h2><div class="row">${['cup','usdt','saldo','credito'].map(m=>`<button class="m ${m===method?'on':''}" onclick="method='${m}';drawHome()">${U[m].toUpperCase()}</button>`).join('')}</div>
+<h2>Player ID</h2><input id="pid" inputmode="numeric" placeholder="Introduce tu ID" value="${esc(pidv)}" oninput="pidv=this.value">
+<h2>Oferta</h2><div class="grid">${offers.map(x=>`<button class="of ${x.id===sel?'on':''}" ${x[pk(method)]>0?'':'disabled style="opacity:.35"'} onclick="sel=${x.id};drawHome()"><b>${esc(x.name)}</b><span>${x[pk(method)]} ${U[method]}</span></button>`).join('')||'<p class="mu">No hay ofertas disponibles.</p>'}</div>
+${ok?`<button class="btn" onclick="order()">Pagar ${o[pk(method)]} ${U[method]}</button>`:''}`}
+async function order(){const pid=pidv.trim();if(!/^\d{6,14}$/.test(pid))return toast('Revisa tu Player ID');
+  const{data,error}=await sb.rpc('create_order',{p_offer:sel,p_player:pid,p_method:method});if(error)return toast(error.message);sel=null;showNew(data)}
+async function showNew(id){const{data:o}=await sb.from('orders').select('*').eq('id',id).single();await loadCfg();const a=o.amount;
+  const how={cup:`Transfiere ${a} CUP a la tarjeta <b>${esc(cfg.card)}</b>`,saldo:`Envía ${a} de saldo móvil al <b>${esc(cfg.mobile)}</b>`,usdt:`Envía ${a} USDT (BEP20) a <b>${esc(cfg.usdt)}</b>`,credito:'Pagado con tus créditos.'}[o.method];
+  last=`<div class="card"><p>${how}</p>${o.method==='credito'?'':`<p class="mu" style="margin:8px 0">Luego envía la captura al soporte con tu número de pedido.</p><a href="${wa('Hola, pagué el pedido #'+o.id)}" target="_blank" rel="noopener"><button class="btn ok" style="background:#059669;margin:0">Enviar captura por WhatsApp</button></a>`}</div>`+ticket(o);$('#view').innerHTML=last}
+const ST={pendiente:['EN PROCESO','Espere a que realicemos su recarga','#4f46e5,#7c3aed','#818cf8'],aceptado:['ENTREGADO','¡Su recarga se ha realizado con éxito!','#16a34a,#0d9488','#34d399'],rechazado:['RECHAZADO','No se pudo completar','#dc2626,#7f1d1d','#f87171']};
+function ticket(o){const s=ST[o.status],ok=o.status==='aceptado',no=o.status==='rechazado',G='#22c55e';
+  const dot=(c,t,m)=>`<div style="text-align:center"><div style="width:32px;height:32px;border-radius:50%;margin:auto;display:grid;place-items:center;background:${c};border:2px solid ${c==='transparent'?'#3b3358':c}">${m||''}</div><div class="mu" style="margin-top:4px">${t}</div></div>`;
+  return `<h2 style="text-align:center;font-size:21px;color:${s[3]}">${s[1]}</h2><div class="card" style="padding:0;overflow:hidden"><div style="background:linear-gradient(135deg,${s[2]});padding:26px;text-align:center"><div style="font-size:46px">${no?'❌':ok?'✅':'💎'}</div><div style="letter-spacing:3px;font-size:12px">${o.kind==='credito'?'CRÉDITOS':'FREE FIRE'}</div><h1 style="font-size:26px">${esc(o.offer_name)}</h1><b>${s[0]}</b></div>
+<div style="padding:16px"><div class="row sp" style="margin-bottom:14px">${dot(G,'Recibido','✓')}${dot(ok||no?G:'#3b82f6','En proceso',ok||no?'✓':'')}${dot(ok?G:no?'#ef4444':'transparent',no?'Rechazado':'Entregado',ok?'✓':no?'✕':'')}</div>
+<div class="card"><span class="mu">TOTAL</span><h2 style="margin:2px 0">${o.amount} ${U[o.method]}</h2></div><div class="grid"><div class="card"><span class="mu">ID</span><br><b>${esc(o.player_id)}</b></div><div class="card"><span class="mu">Método</span><br><b>${U[o.method]}</b></div></div>
+<p class="mu">${new Date(o.created_at).toLocaleString('es')}</p><p class="mu">Número del pedido <b style="font-size:20px;color:#fff">#${o.id}</b></p>${no&&o.method==='credito'?'<p>Te devolvimos tus créditos.</p>':''}</div></div><button class="btn" onclick="go('home')">Regresar</button>`}
 
-// ---------- PEDIDOS / PERFIL ----------
-const orderRow=(o,adm)=>`<div class="card"><div class="row sp"><b>#${o.id} · ${esc(o.offer_name)}</b><span class="pill ${o.status}">${o.status}</span></div>
+// ---------- PEDIDOS / AVISOS / PERFIL ----------
+const orderRow=(o,adm,click)=>`<div class="card" ${click?`onclick="${click}" style="cursor:pointer"`:''}><div class="row sp"><b>#${o.id} · ${esc(o.offer_name)}</b><span class="pill ${o.status}">${o.status}</span></div>
 <p class="mu">ID ${esc(o.player_id)} · ${o.amount} ${U[o.method]} · ${new Date(o.created_at).toLocaleString('es')}${adm&&o.profiles?'<br>'+esc(o.profiles.name)+' · '+esc(o.profiles.email):''}</p>
 ${adm&&o.status==='pendiente'?`<div class="row" style="margin-top:10px"><button class="sm ok" onclick="setSt(${o.id},'aceptado')">Aceptar</button><button class="sm bad" onclick="setSt(${o.id},'rechazado')">Rechazar</button></div>`:''}</div>`;
-async function ordersV(){const{data}=await sb.from('orders').select('*').eq('user_id',me.id).order('id',{ascending:false});
-  $('#view').innerHTML='<h2>Mis pedidos</h2>'+((data||[]).map(o=>orderRow(o)).join('')||'<p class="mu">Aún no tienes pedidos. Elige un paquete en Ofertas.</p>')}
-function meV(){$('#view').innerHTML=`<div class="card"><h2 style="margin-top:0">${esc(me.name)}</h2><p class="mu">${esc(me.email)}<br>${esc(me.phone)}</p>
+let oc={};
+async function ordersV(){const{data}=await sb.from('orders').select('*').eq('user_id',me.id).order('id',{ascending:false});(data||[]).forEach(o=>oc[o.id]=o);
+  $('#view').innerHTML='<h2>Mis pedidos</h2>'+((data||[]).map(o=>orderRow(o,0,'openO('+o.id+')')).join('')||'<p class="mu">Aún no tienes pedidos. Elige un juego en Principal.</p>')}
+function openO(id){$('#view').innerHTML=ticket(oc[id])}
+async function notifV(){const{data}=await sb.from('notifications').select('*').eq('user_id',me.id).order('id',{ascending:false}).limit(50);
+  $('#view').innerHTML='<h2>Avisos</h2>'+((data||[]).map(n=>`<div class="card" ${n.read?'':'style="border-color:#d946ef"'}><b>${esc(n.title)}</b><p>${esc(n.body)}</p><span class="mu">${new Date(n.created_at).toLocaleString('es')}</span></div>`).join('')||'<p class="mu">Sin avisos por ahora.</p>');
+  sb.from('notifications').update({read:true}).eq('user_id',me.id).eq('read',false).then(()=>{})}
+async function meV(){await loadMe();$('#view').innerHTML=`<div class="card"><h2 style="margin-top:0">${esc(me.name)}</h2><p class="mu">${esc(me.email)}<br>${esc(me.phone)}</p></div>
+<div class="card"><span class="mu">Tus créditos</span><h1 style="font-size:36px">${me.role==='admin'?'∞':me.credits}</h1><button class="btn" onclick="buyV()">Comprar créditos</button></div>
 <a href="${wa('Hola, necesito ayuda con NEXORA TOPUP')}" target="_blank" rel="noopener"><button class="btn ok" style="background:#059669">Hablar con soporte</button></a>
-<button class="btn" style="background:#2b2140;box-shadow:none" onclick="logout()">Cerrar sesión</button></div>`}
+<button class="btn" style="background:#2b2140;box-shadow:none" onclick="logout()">Cerrar sesión</button>`}
+let bq=10,bm='cup';
+async function buyV(){await loadCfg();drawBuy()}
+function drawBuy(){const p=+cfg['pc_'+bm];$('#view').innerHTML=`<button class="sm" onclick="go('me')">← Perfil</button><h2>Comprar créditos</h2><h2>Método de pago</h2><div class="row">${['cup','usdt','saldo'].map(m=>`<button class="m ${m===bm?'on':''}" onclick="bm='${m}';drawBuy()">${U[m].toUpperCase()}</button>`).join('')}</div>
+<h2>Cantidad</h2><div class="row">${[5,10,25,50,100].map(n=>`<button class="m ${n===bq?'on':''}" onclick="bq=${n};drawBuy()">${n}</button>`).join('')}</div><label>O escribe otra cantidad</label><input type="number" min="1" value="${bq}" onchange="bq=+this.value||1;drawBuy()">
+<p class="mu" style="margin-top:10px">1 crédito = ${p} ${U[bm]}</p><button class="btn" onclick="buy()">Pagar ${+(p*bq).toFixed(2)} ${U[bm]}</button>`}
+async function buy(){const{data,error}=await sb.rpc('buy_credits',{p_qty:bq,p_method:bm});if(error)return toast(error.message);showNew(data)}
 
 // ---------- ADMIN ----------
 async function setSt(id,s){const{error}=await sb.from('orders').update({status:s}).eq('id',id);if(error)return toast(error.message);toast('Pedido '+s);adminV()}
 function adminV(){const T=[['clientes','Clientes'],['pedidos','Pedidos'],['ofertas','Ofertas'],['pagos','Pagos']];
   $('#view').innerHTML=`<div class="tabs">${T.map(([k,l])=>`<button class="${atab===k?'on':''}" onclick="atab='${k}';adminV()">${l}</button>`).join('')}</div><div id="ad"></div>`;({clientes:aCli,pedidos:aPed,ofertas:aOf,pagos:aPay})[atab]()}
-async function aCli(q=''){const[{data:u},{data:c}]=await Promise.all([sb.from('profiles').select('*').order('created_at',{ascending:false}),sb.from('codes').select('*')]);
-  const cd={};(c||[]).forEach(x=>cd[x.user_id]=x.code);const f=(u||[]).filter(p=>(p.name+p.email+p.phone).toLowerCase().includes(q.toLowerCase()));
-  $('#ad').innerHTML=`<input placeholder="Buscar nombre, correo o número" value="${esc(q)}" oninput="aCli(this.value)" style="margin:12px 0">`+f.map(p=>`<div class="card"><div class="row sp"><b>${esc(p.name)}</b><span class="pill">${p.role==='admin'?'ADMIN':p.verified?'VERIFICADO':'SIN VERIFICAR'}</span></div>
-<p class="mu">${esc(p.email)} · ${esc(p.phone)}</p>${p.verified?'':`<p>Código: <span class="code">${esc(cd[p.id])}</span></p>`}
-<div class="row" style="margin-top:10px">${p.verified?'':`<a href="https://wa.me/${encodeURIComponent((p.phone||'').replace(/\D/g,''))}?text=${encodeURIComponent('Tu código de NEXORA TOPUP es '+cd[p.id])}" target="_blank" rel="noopener"><button class="sm ok">Enviar por WhatsApp</button></a><button class="sm" onclick="upP('${p.id}',{verified:true})">Verificar sin código</button>`}
-${p.id===me.id?'':p.role==='admin'?`<button class="sm bad" onclick="upP('${p.id}',{role:'user'})">Quitar admin</button>`:`<button class="sm" onclick="if(confirm('¿Dar acceso de admin a ${esc(p.name)}?'))upP('${p.id}',{role:'admin',verified:true})">Hacer admin</button>`}</div></div>`).join('')}
-async function upP(id,v){const{error}=await sb.from('profiles').update(v).eq('id',id);if(error)return toast(error.message);toast('Listo');aCli()}
+async function aCli(q){if(q===undefined){$('#ad').innerHTML='<input placeholder="Buscar nombre, correo o número" oninput="aCli(this.value)" style="margin:12px 0"><div id="cl"></div>';q=''}
+  const{data:u}=await sb.from('profiles').select('*').order('created_at',{ascending:false});
+  $('#cl').innerHTML=(u||[]).filter(p=>(p.name+p.email+p.phone).toLowerCase().includes(q.toLowerCase())).map(p=>`<div class="card row sp"><div><b>${esc(p.name)}</b><div class="mu">${esc(p.email)}</div></div><div class="row"><span class="pill">${p.banned?'BANEADO':p.role==='admin'?'ADMIN':p.verified?'VERIFICADO':'SIN VERIFICAR'}</span><button class="sm" style="background:var(--g)" onclick="aCliD('${p.id}')">Ver</button></div></div>`).join('')}
+async function aCliD(id){const[{data:p},{data:c},{data:os}]=await Promise.all([sb.from('profiles').select('*').eq('id',id).single(),sb.from('codes').select('code').eq('user_id',id).maybeSingle(),sb.from('orders').select('*').eq('user_id',id).order('id',{ascending:false}).limit(30)]);
+  $('#ad').innerHTML=`<button class="sm" onclick="aCli()" style="margin:12px 0">← Clientes</button><div class="card"><h3>${esc(p.name)}</h3><p class="mu">${esc(p.email)} · ${esc(p.phone)}</p>${p.verified?'':`<p>Código: <span class="code">${esc(c?.code)}</span></p>`}
+<label>Créditos ${p.role==='admin'?'(admin: infinitos)':''}</label><div class="row"><input id="cc" type="number" step="any" value="${p.credits}" style="flex:1"><button class="sm ok" onclick="upP('${id}',{credits:+$('#cc').value})">Guardar</button></div>
+<div class="row" style="margin-top:12px">${p.verified?'':`<a href="https://wa.me/${encodeURIComponent((p.phone||'').replace(/\D/g,''))}?text=${encodeURIComponent('Tu código de NEXORA TOPUP es '+(c?.code||''))}" target="_blank" rel="noopener"><button class="sm ok">Enviar código</button></a><button class="sm" onclick="upP('${id}',{verified:true})">Verificar sin código</button>`}
+${p.id===me.id?'':`<button class="sm" onclick="if(confirm('¿Cambiar rol?'))upP('${id}',{role:'${p.role==='admin'?'user':'admin'}',verified:true})">${p.role==='admin'?'Quitar admin':'Hacer admin'}</button><button class="sm bad" onclick="upP('${id}',{banned:${!p.banned}})">${p.banned?'Quitar baneo':'Banear cliente'}</button>`}</div></div>
+<div class="card"><label>Enviar mensaje</label><input id="mm" placeholder="Mensaje para el cliente"><button class="btn" onclick="sendM('${id}')">Enviar mensaje</button></div><h2>Pedidos del cliente</h2>${(os||[]).map(o=>orderRow(o,true)).join('')||'<p class="mu">Sin pedidos.</p>'}`}
+async function upP(id,v){const{error}=await sb.from('profiles').update(v).eq('id',id);if(error)return toast(error.message);toast('Listo');aCliD(id)}
+async function sendM(id){const t=$('#mm').value.trim();if(!t)return;const{error}=await sb.from('notifications').insert({user_id:id,title:'Mensaje del soporte',body:t});toast(error?error.message:'Mensaje enviado');$('#mm').value=''}
 async function aPed(){const{data}=await sb.from('orders').select('*,profiles(name,email)').order('id',{ascending:false}).limit(100);
   $('#ad').innerHTML=(data||[]).map(o=>orderRow(o,true)).join('')||'<p class="mu">Sin pedidos todavía.</p>'}
 async function aOf(){const{data}=await sb.from('offers').select('*').order('sort').order('id');
-  const f=(o)=>`<div class="card"><label>Nombre</label><input id="n${o.id}" value="${esc(o.name)}"><div class="grid"><div><label>Precio CUP</label><input id="c${o.id}" type="number" step="any" value="${o.price_cup}"></div><div><label>Precio USDT</label><input id="u${o.id}" type="number" step="any" value="${o.price_usdt}"></div><div><label>Precio saldo</label><input id="s${o.id}" type="number" step="any" value="${o.price_saldo}"></div><div><label>Orden</label><input id="o${o.id}" type="number" value="${o.sort}"></div></div>
+  const f=(o)=>`<div class="card"><label>Nombre</label><input id="n${o.id}" value="${esc(o.name)}"><div class="grid"><div><label>Precio CUP</label><input id="c${o.id}" type="number" step="any" value="${o.price_cup}"></div><div><label>Precio USDT</label><input id="u${o.id}" type="number" step="any" value="${o.price_usdt}"></div><div><label>Precio saldo</label><input id="s${o.id}" type="number" step="any" value="${o.price_saldo}"></div><div><label>Precio créditos</label><input id="r${o.id}" type="number" step="any" value="${o.price_credits}"></div><div><label>Orden</label><input id="o${o.id}" type="number" value="${o.sort}"></div></div>
 <p class="mu" style="margin-top:6px">Pon 0 en un precio para desactivar ese método. ${o.active?'Visible':'Oculta'}.</p>
 <div class="row" style="margin-top:8px"><button class="sm ok" onclick="saveO(${o.id})">Guardar</button><button class="sm" onclick="tgO(${o.id},${!o.active})">${o.active?'Ocultar':'Mostrar'}</button><button class="sm bad" onclick="if(confirm('¿Borrar oferta?'))delO(${o.id})">Borrar</button></div></div>`;
   $('#ad').innerHTML=`<div class="card"><h3>Nueva oferta</h3><label>Nombre</label><input id="nn" placeholder="Ej.: 110 Diamantes"><div class="grid"><div><label>CUP</label><input id="nc" type="number" value="0"></div><div><label>USDT</label><input id="nu" type="number" step="any" value="0"></div><div><label>Saldo</label><input id="ns" type="number" value="0"></div></div><button class="btn" onclick="addO()">Agregar oferta</button></div>`+(data||[]).map(f).join('')}
 async function addO(){const n=$('#nn').value.trim();if(!n)return toast('Pon un nombre');const{error}=await sb.from('offers').insert({name:n,price_cup:+$('#nc').value,price_usdt:+$('#nu').value,price_saldo:+$('#ns').value,sort:99});if(error)return toast(error.message);aOf()}
-async function saveO(i){const{error}=await sb.from('offers').update({name:$('#n'+i).value,price_cup:+$('#c'+i).value,price_usdt:+$('#u'+i).value,price_saldo:+$('#s'+i).value,sort:+$('#o'+i).value}).eq('id',i);toast(error?error.message:'Oferta guardada')}
+async function saveO(i){const{error}=await sb.from('offers').update({name:$('#n'+i).value,price_cup:+$('#c'+i).value,price_usdt:+$('#u'+i).value,price_saldo:+$('#s'+i).value,price_credits:+$('#r'+i).value,sort:+$('#o'+i).value}).eq('id',i);toast(error?error.message:'Oferta guardada')}
 async function tgO(i,a){await sb.from('offers').update({active:a}).eq('id',i);aOf()}
 async function delO(i){await sb.from('offers').delete().eq('id',i);aOf()}
-async function aPay(){await loadCfg();$('#ad').innerHTML=`<div class="note">Cambia estos datos con cuidado: los clientes los ven al instante y mandan su dinero ahí.</div><div class="card"><label>Tarjeta (CUP)</label><input id="k1" value="${esc(cfg.card)}"><label>Número para saldo móvil</label><input id="k2" value="${esc(cfg.mobile)}"><label>Dirección USDT (BEP20)</label><input id="k3" value="${esc(cfg.usdt)}"><button class="btn" onclick="savePay()">Guardar datos de pago</button></div>`}
-async function savePay(){const{error}=await sb.from('settings').upsert([{key:'card',value:$('#k1').value.trim()},{key:'mobile',value:$('#k2').value.trim()},{key:'usdt',value:$('#k3').value.trim()}]);toast(error?error.message:'Datos guardados')}
+async function aPay(){await loadCfg();$('#ad').innerHTML=`<div class="note">Cambia estos datos con cuidado: los clientes los ven al instante y mandan su dinero ahí.</div><div class="card"><label>Tarjeta (CUP)</label><input id="k1" value="${esc(cfg.card)}"><label>Número para saldo móvil</label><input id="k2" value="${esc(cfg.mobile)}"><label>Dirección USDT (BEP20)</label><input id="k3" value="${esc(cfg.usdt)}"><label>Valor de 1 crédito en CUP</label><input id="p1" type="number" step="any" value="${esc(cfg.pc_cup)}"><label>Valor de 1 crédito en USDT</label><input id="p2" type="number" step="any" value="${esc(cfg.pc_usdt)}"><label>Valor de 1 crédito en saldo</label><input id="p3" type="number" step="any" value="${esc(cfg.pc_saldo)}"><button class="btn" onclick="savePay()">Guardar datos de pago</button></div>`}
+async function savePay(){const{error}=await sb.from('settings').upsert([{key:'card',value:$('#k1').value.trim()},{key:'mobile',value:$('#k2').value.trim()},{key:'usdt',value:$('#k3').value.trim()},{key:'pc_cup',value:$('#p1').value},{key:'pc_usdt',value:$('#p2').value},{key:'pc_saldo',value:$('#p3').value}]);toast(error?error.message:'Datos guardados')}
 
+const QA=[['¿Cómo recargo diamantes?','1) En Principal toca Free Fire. 2) Elige método de pago, escribe tu ID y elige la oferta. 3) Paga y envía la captura por WhatsApp. 4) Sigue tu pedido en Pedidos.'],['¿Cómo compro créditos?','Ve a Perfil → Comprar créditos, elige método y cantidad y paga. Cuando se confirme verás tus créditos en Perfil y podrás pagar recargas con ellos.'],['¿Cuánto tarda mi recarga?','Hasta 10 minutos después de confirmar el pago. Te avisamos en Avisos.'],['¿Por qué rechazaron mi pedido?','Suele ser un ID incorrecto o un pago que no se encontró. Si pagaste con créditos, se devuelven solos. Escribe al soporte.'],['Hablar con soporte',null]];
+function botT(){const p=$('#botp');p.style.display=p.style.display==='block'?'none':'block';botM()}
+function botM(a){$('#botp').innerHTML=`<b>Asistente NEXORA</b><p style="margin:8px 0" class="${a?'':'mu'}">${a||'¿En qué te ayudo?'}</p>`+QA.map(([q,r],i)=>`<button class="sm" style="display:block;width:100%;margin-top:6px;text-align:left" onclick="${r?`botM(QA[${i}][1])`:`window.open('${wa('Hola, necesito ayuda')}')`}">${q}</button>`).join('')}
 sb.auth.onAuthStateChange((e)=>{if(e==='SIGNED_OUT'){me=null;render()}});
 loadMe().then(render);
 </script>
