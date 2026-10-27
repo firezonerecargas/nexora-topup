@@ -85,12 +85,17 @@ ${r?'<label>Nombre</label><input id="a_n" autocomplete="name"><label>Número de 
 <label>Contraseña</label><input id="a_w" type="password" autocomplete="${r?'new-password':'current-password'}">
 <button class="btn" onclick="${r?'signUp()':'signIn()'}">${r?'Crear cuenta':'Entrar'}</button>
 <p class="mu" style="margin-top:14px;text-align:center">${r?'¿Ya tienes cuenta?':'¿Aún no tienes cuenta?'} <a href="#" onclick="mode='${r?'login':'register'}';render();return false">${r?'Inicia sesión':'Crea una'}</a></p></div>`}
-async function signIn(){const{error}=await sb.auth.signInWithPassword({email:$('#a_e').value.trim(),password:$('#a_w').value});
-  if(error)return toast('Correo o contraseña incorrectos');await loadMe();render()}
-async function signUp(){const name=$('#a_n').value.trim(),phone=$('#a_p').value.trim(),email=$('#a_e').value.trim(),password=$('#a_w').value;
+async function signIn(){const{error}=await sb.auth.signInWithPassword({email:$('#a_e').value.trim().toLowerCase(),password:$('#a_w').value});
+  if(error)return toast(/confirm/i.test(error.message)?'Falta confirmar el correo. Desactiva "Confirm email" en Supabase.':'Correo o contraseña incorrectos');
+  await loadMe();if(!me)return toast('No se encontró tu perfil. Revisa que el SQL se ejecutó completo.');render()}
+async function signUp(){const name=$('#a_n').value.trim(),phone=$('#a_p').value.trim(),email=$('#a_e').value.trim().toLowerCase(),password=$('#a_w').value;
   if(!name||!phone||!email||password.length<6)return toast('Completa todos los campos (contraseña de 6+ caracteres)');
   const{data,error}=await sb.auth.signUp({email,password,options:{data:{name,phone}}});
-  if(error)return toast(error.message);if(!data.session)return toast('Cuenta creada. Inicia sesión.');await loadMe();render()}
+  if(error)return toast(error.message);
+  if(data.user&&data.user.identities&&!data.user.identities.length)return toast('Ese correo ya tiene una cuenta. Inicia sesión.');
+  if(!data.session){const r=await sb.auth.signInWithPassword({email,password});
+    if(r.error)return toast('Cuenta creada, pero Supabase pide confirmar el correo. Desactiva "Confirm email" en Authentication → Providers → Email.')}
+  await loadMe();if(!me)return toast('Cuenta creada, pero falta el perfil. Revisa que el SQL se ejecutó completo.');render()}
 function verifyV(){return `<div class="card"><h2>Verifica tu cuenta</h2><p class="mu">Escribe al soporte por WhatsApp para recibir tu código de verificación (${SUPPORT}).</p>
 <a href="${wa('Hola, necesito mi código de verificación. Mi correo: '+esc(me.email))}" target="_blank" rel="noopener"><button class="btn ok" style="background:#059669">Pedir código por WhatsApp</button></a>
 <label>Código de verificación</label><input id="vc" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;text-align:center;font-size:20px">
