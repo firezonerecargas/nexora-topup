@@ -76,7 +76,7 @@ async function render(){
   if(!me.verified){nav.style.display='none';return v.innerHTML=verifyV()}
   const items=[['home','Principal'],['orders','Pedidos'],['notif','Avisos'],['me','Perfil']];if(me.role==='admin')items.push(['admin','Admin']);
   nav.style.display='flex';nav.innerHTML=items.map(([k,l])=>`<button data-k="${k}" class="${tab===k?'on':''}" onclick="go('${k}')">${l}</button>`).join('');
-  sb.from('notifications').select('id',{count:'exact',head:true}).eq('user_id',me.id).eq('read',false).then(r=>{const b=nav.querySelector('[data-k=notif]');if(r.count&&b)b.textContent='Avisos ('+r.count+')'});
+  sb.from('notifications').select('scope').eq('user_id',me.id).eq('read',false).then(r=>{const d=r.data||[],u=d.filter(x=>x.scope!=='admin').length,a=d.length-u,b=nav.querySelector('[data-k=notif]'),c=nav.querySelector('[data-k=admin]');if(u&&b)b.textContent='Avisos ('+u+')';if(a&&c)c.textContent='Admin ('+a+')'});
   ({home:homeV,orders:ordersV,notif:notifV,me:meV,admin:adminV})[tab]()
 }
 function go(t){tab=t;last=null;render()}
@@ -109,13 +109,24 @@ async function verify(){const{data,error}=await sb.rpc('verify_account',{p_code:
 async function logout(){await sb.auth.signOut();me=null;render()}
 
 // ---------- OFERTAS ----------
+const FF=`<svg viewBox="0 0 400 180" preserveAspectRatio="xMidYMid slice" style="position:absolute;inset:0;width:100%;height:100%"><defs><linearGradient id="fb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e0b3a"/><stop offset=".55" stop-color="#6d28d9"/><stop offset="1" stop-color="#f97316"/></linearGradient><linearGradient id="fd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e0f7ff"/><stop offset="1" stop-color="#22a6ff"/></linearGradient><linearGradient id="ff" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#ef4444"/><stop offset="1" stop-color="#fde047"/></linearGradient></defs><rect width="400" height="180" fill="url(#fb)"/><circle cx="320" cy="40" r="90" fill="#fff" opacity=".06"/><path d="M200 18c18 30 46 44 46 84 0 30-20 52-46 52s-46-22-46-52c0-18 10-28 18-40 2 14 10 20 16 22-6-28 0-46 12-66z" fill="url(#ff)"/><path d="M200 70c10 16 24 24 24 46 0 16-10 28-24 28s-24-12-24-28c0-12 6-18 10-24 2 8 6 10 9 11-3-14 0-24 5-33z" fill="#fff" opacity=".35"/><g fill="url(#fd)" stroke="#fff" stroke-opacity=".6"><path d="M70 100l20-14h30l20 14-35 44z"/><path d="M300 110l14-10h22l14 10-25 32z"/></g></svg>`;
+const proofCard=o=>o.method==='credito'||o.status!=='pendiente'?'':o.proof?'<div class="note">✓ Comprobante enviado. Lo revisaremos en breve.</div>':`<div class="card"><b>Comprobante de pago</b><p class="mu">Adjunta una imagen de la transferencia para agilizar la revisión.</p><label for="pf" style="border:2px dashed #7c3aed;border-radius:16px;padding:22px;text-align:center;color:#e9b6ff;cursor:pointer;margin-top:10px">📷 Adjuntar imagen</label><input id="pf" type="file" accept="image/*" hidden onchange="pf=this.files[0];$('#pn').textContent=pf?pf.name:''"><p id="pn" class="mu"></p><button class="btn" onclick="sendProof(${o.id})">Enviar a revisión</button></div>`;
+let pf=null;
+async function sendProof(id){if(!pf)return toast('Adjunta la imagen primero');
+  try{const bmp=await createImageBitmap(pf),k=Math.min(1,1000/Math.max(bmp.width,bmp.height)),c=document.createElement('canvas');c.width=bmp.width*k;c.height=bmp.height*k;c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+  const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.8)),path=`${me.id}/${id}-${Date.now()}.jpg`;
+  const{error}=await sb.storage.from('proofs').upload(path,blob,{contentType:'image/jpeg'});if(error)return toast(error.message);
+  const r=await sb.rpc('set_proof',{p_order:id,p_path:path});if(r.error)return toast(r.error.message);
+  toast('Comprobante enviado');pf=null;last=null;const{data:o}=await sb.from('orders').select('*').eq('id',id).single();oc[id]=o;$('#view').innerHTML=ticket(o)}catch(e){toast('No se pudo leer la imagen')}}
+async function viewProof(path){const{data,error}=await sb.storage.from('proofs').createSignedUrl(path,300);if(error)return toast(error.message);
+  const d=document.createElement('div');d.style.cssText='position:fixed;inset:0;background:#000d;z-index:20;display:grid;place-items:center;padding:12px';d.onclick=()=>d.remove();d.innerHTML=`<img src="${data.signedUrl}" alt="Comprobante" style="max-width:100%;max-height:100%;border-radius:12px">`;document.body.appendChild(d)}
 const pk=m=>m==='credito'?'price_credits':'price_'+m;
 async function homeV(){
   if(last)return $('#view').innerHTML=last;
   const[{data}]=await Promise.all([sb.from('offers').select('*').eq('active',true).order('sort').order('id'),loadCfg()]);
   offers=data||[];drawHome()}
 function drawHome(){
-  if(!gm)return $('#view').innerHTML=`<h2>Juegos</h2><button class="of" style="width:100%;padding:0;overflow:hidden" onclick="gm=true;drawHome()"><div style="height:140px;background:linear-gradient(135deg,#7c3aed,#ea580c);display:grid;place-items:center;font-size:60px;position:relative">🔥<img src="freefire.jpg" alt="" onerror="this.remove()" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></div><div style="padding:12px"><b>Free Fire</b><div class="mu">Recarga de diamantes por ID</div></div></button>`;
+  if(!gm)return $('#view').innerHTML=`<h2>Juegos</h2><button class="of" style="width:100%;padding:0;overflow:hidden" onclick="gm=true;drawHome()"><div style="height:140px;position:relative">${FF}<img src="freefire.jpg" alt="" onerror="this.remove()" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"></div><div style="padding:12px"><b>Free Fire</b><div class="mu">Recarga de diamantes por ID</div></div></button>`;
   const o=offers.find(x=>x.id===sel),ok=o&&o[pk(method)]>0;
   $('#view').innerHTML=`<button class="sm" onclick="gm=false;sel=null;drawHome()">← Juegos</button><h2>Método de pago</h2><div class="row">${['cup','usdt','saldo','credito'].map(m=>`<button class="m ${m===method?'on':''}" onclick="method='${m}';drawHome()">${U[m].toUpperCase()}</button>`).join('')}</div>
 <h2>Player ID</h2><input id="pid" inputmode="numeric" placeholder="Introduce tu ID" value="${esc(pidv)}" oninput="pidv=this.value">
@@ -125,28 +136,28 @@ async function order(){const pid=pidv.trim();if(!/^\d{6,14}$/.test(pid))return t
   const{data,error}=await sb.rpc('create_order',{p_offer:sel,p_player:pid,p_method:method});if(error)return toast(error.message);sel=null;showNew(data)}
 async function showNew(id){const{data:o}=await sb.from('orders').select('*').eq('id',id).single();await loadCfg();const a=o.amount;
   const how={cup:`Transfiere ${a} CUP a la tarjeta <b>${esc(cfg.card)}</b>`,saldo:`Envía ${a} de saldo móvil al <b>${esc(cfg.mobile)}</b>`,usdt:`Envía ${a} USDT (BEP20) a <b>${esc(cfg.usdt)}</b>`,credito:'Pagado con tus créditos.'}[o.method];
-  last=`<div class="card"><p>${how}</p>${o.method==='credito'?'':`<p class="mu" style="margin:8px 0">Luego envía la captura al soporte con tu número de pedido.</p><a href="${wa('Hola, pagué el pedido #'+o.id)}" target="_blank" rel="noopener"><button class="btn ok" style="background:#059669;margin:0">Enviar captura por WhatsApp</button></a>`}</div>`+ticket(o);$('#view').innerHTML=last}
+  last=`<div class="card"><p>${how}</p></div>`+ticket(o);$('#view').innerHTML=last}
 const ST={pendiente:['EN PROCESO','Espere a que realicemos su recarga','#4f46e5,#7c3aed','#818cf8'],aceptado:['ENTREGADO','¡Su recarga se ha realizado con éxito!','#16a34a,#0d9488','#34d399'],rechazado:['RECHAZADO','No se pudo completar','#dc2626,#7f1d1d','#f87171']};
 function ticket(o){const s=ST[o.status],ok=o.status==='aceptado',no=o.status==='rechazado',G='#22c55e';
   const dot=(c,t,m)=>`<div style="text-align:center"><div style="width:32px;height:32px;border-radius:50%;margin:auto;display:grid;place-items:center;background:${c};border:2px solid ${c==='transparent'?'#3b3358':c}">${m||''}</div><div class="mu" style="margin-top:4px">${t}</div></div>`;
   return `<h2 style="text-align:center;font-size:21px;color:${s[3]}">${s[1]}</h2><div class="card" style="padding:0;overflow:hidden"><div style="background:linear-gradient(135deg,${s[2]});padding:26px;text-align:center"><div style="font-size:46px">${no?'❌':ok?'✅':'💎'}</div><div style="letter-spacing:3px;font-size:12px">${o.kind==='credito'?'CRÉDITOS':'FREE FIRE'}</div><h1 style="font-size:26px">${esc(o.offer_name)}</h1><b>${s[0]}</b></div>
 <div style="padding:16px"><div class="row sp" style="margin-bottom:14px">${dot(G,'Recibido','✓')}${dot(ok||no?G:'#3b82f6','En proceso',ok||no?'✓':'')}${dot(ok?G:no?'#ef4444':'transparent',no?'Rechazado':'Entregado',ok?'✓':no?'✕':'')}</div>
 <div class="card"><span class="mu">TOTAL</span><h2 style="margin:2px 0">${o.amount} ${U[o.method]}</h2></div><div class="grid"><div class="card"><span class="mu">ID</span><br><b>${esc(o.player_id)}</b></div><div class="card"><span class="mu">Método</span><br><b>${U[o.method]}</b></div></div>
-<p class="mu">${new Date(o.created_at).toLocaleString('es')}</p><p class="mu">Número del pedido <b style="font-size:20px;color:#fff">#${o.id}</b></p>${no&&o.method==='credito'?'<p>Te devolvimos tus créditos.</p>':''}</div></div><button class="btn" onclick="go('home')">Regresar</button>`}
+<p class="mu">${new Date(o.created_at).toLocaleString('es')}</p><p class="mu">Número del pedido <b style="font-size:20px;color:#fff">#${o.id}</b></p>${no&&o.method==='credito'?'<p>Te devolvimos tus créditos.</p>':''}</div></div>${proofCard(o)}<button class="btn" onclick="go('home')">Regresar</button>`}
 
 // ---------- PEDIDOS / AVISOS / PERFIL ----------
 const orderRow=(o,adm,click)=>`<div class="card" ${click?`onclick="${click}" style="cursor:pointer"`:''}><div class="row sp"><b>#${o.id} · ${esc(o.offer_name)}</b><span class="pill ${o.status}">${o.status}</span></div>
 <p class="mu">ID ${esc(o.player_id)} · ${o.amount} ${U[o.method]} · ${new Date(o.created_at).toLocaleString('es')}${adm&&o.profiles?'<br>'+esc(o.profiles.name)+' · '+esc(o.profiles.email):''}</p>
-${adm&&o.status==='pendiente'?`<div class="row" style="margin-top:10px"><button class="sm ok" onclick="setSt(${o.id},'aceptado')">Aceptar</button><button class="sm bad" onclick="setSt(${o.id},'rechazado')">Rechazar</button></div>`:''}</div>`;
+${adm?`<div class="row" style="margin-top:10px">${o.proof?`<button class="sm" style="background:var(--g)" onclick="viewProof('${o.proof}')">Ver captura</button>`:o.method!=='credito'&&o.status==='pendiente'?'<span class="mu">Sin captura aún</span>':''}${o.status==='pendiente'?`<button class="sm ok" onclick="setSt(${o.id},'aceptado')">Aceptar</button><button class="sm bad" onclick="setSt(${o.id},'rechazado')">Rechazar</button>`:''}</div>`:''}</div>`;
 let oc={};
 async function ordersV(){const{data}=await sb.from('orders').select('*').eq('user_id',me.id).order('id',{ascending:false});(data||[]).forEach(o=>oc[o.id]=o);
   $('#view').innerHTML='<h2>Mis pedidos</h2>'+((data||[]).map(o=>orderRow(o,0,'openO('+o.id+')')).join('')||'<p class="mu">Aún no tienes pedidos. Elige un juego en Principal.</p>')}
 function openO(id){$('#view').innerHTML=ticket(oc[id])}
-async function notifV(){const{data}=await sb.from('notifications').select('*').eq('user_id',me.id).order('id',{ascending:false}).limit(50);
+async function notifV(){const{data}=await sb.from('notifications').select('*').eq('user_id',me.id).eq('scope','user').order('id',{ascending:false}).limit(50);
   $('#view').innerHTML='<h2>Avisos</h2>'+((data||[]).map(n=>`<div class="card" ${n.read?'':'style="border-color:#d946ef"'}><b>${esc(n.title)}</b><p>${esc(n.body)}</p><span class="mu">${new Date(n.created_at).toLocaleString('es')}</span></div>`).join('')||'<p class="mu">Sin avisos por ahora.</p>');
-  sb.from('notifications').update({read:true}).eq('user_id',me.id).eq('read',false).then(()=>{})}
+  sb.from('notifications').update({read:true}).eq('user_id',me.id).eq('scope','user').eq('read',false).then(()=>{})}
 async function meV(){await loadMe();$('#view').innerHTML=`<div class="card"><h2 style="margin-top:0">${esc(me.name)}</h2><p class="mu">${esc(me.email)}<br>${esc(me.phone)}</p></div>
-<div class="card"><span class="mu">Tus créditos</span><h1 style="font-size:36px">${me.role==='admin'?'∞':me.credits}</h1><button class="btn" onclick="buyV()">Comprar créditos</button></div>
+<div class="card"><span class="mu">Tus créditos</span><h1 style="font-size:36px">${me.credits}</h1><button class="btn" onclick="buyV()">Comprar créditos</button></div>
 <a href="${wa('Hola, necesito ayuda con NEXORA TOPUP')}" target="_blank" rel="noopener"><button class="btn ok" style="background:#059669">Hablar con soporte</button></a>
 <button class="btn" style="background:#2b2140;box-shadow:none" onclick="logout()">Cerrar sesión</button>`}
 let bq=10,bm='cup';
@@ -158,19 +169,26 @@ async function buy(){const{data,error}=await sb.rpc('buy_credits',{p_qty:bq,p_me
 
 // ---------- ADMIN ----------
 async function setSt(id,s){const{error}=await sb.from('orders').update({status:s}).eq('id',id);if(error)return toast(error.message);toast('Pedido '+s);adminV()}
-function adminV(){const T=[['clientes','Clientes'],['pedidos','Pedidos'],['ofertas','Ofertas'],['pagos','Pagos']];
-  $('#view').innerHTML=`<div class="tabs">${T.map(([k,l])=>`<button class="${atab===k?'on':''}" onclick="atab='${k}';adminV()">${l}</button>`).join('')}</div><div id="ad"></div>`;({clientes:aCli,pedidos:aPed,ofertas:aOf,pagos:aPay})[atab]()}
+function adminV(){const T=[['clientes','Clientes'],['pedidos','Pedidos'],['creditos','Créditos'],['avisos','Avisos'],['ofertas','Ofertas'],['pagos','Pagos']];
+  $('#view').innerHTML=`<div class="tabs">${T.map(([k,l])=>`<button class="${atab===k?'on':''}" onclick="atab='${k}';adminV()">${l}</button>`).join('')}</div><div id="ad"></div>`;({clientes:aCli,pedidos:aPed,creditos:aCred,avisos:aAv,ofertas:aOf,pagos:aPay})[atab]()}
 async function aCli(q){if(q===undefined){$('#ad').innerHTML='<input placeholder="Buscar nombre, correo o número" oninput="aCli(this.value)" style="margin:12px 0"><div id="cl"></div>';q=''}
   const{data:u}=await sb.from('profiles').select('*').order('created_at',{ascending:false});
   $('#cl').innerHTML=(u||[]).filter(p=>(p.name+p.email+p.phone).toLowerCase().includes(q.toLowerCase())).map(p=>`<div class="card row sp"><div><b>${esc(p.name)}</b><div class="mu">${esc(p.email)}</div></div><div class="row"><span class="pill">${p.banned?'BANEADO':p.role==='admin'?'ADMIN':p.verified?'VERIFICADO':'SIN VERIFICAR'}</span><button class="sm" style="background:var(--g)" onclick="aCliD('${p.id}')">Ver</button></div></div>`).join('')}
 async function aCliD(id){const[{data:p},{data:c},{data:os}]=await Promise.all([sb.from('profiles').select('*').eq('id',id).single(),sb.from('codes').select('code').eq('user_id',id).maybeSingle(),sb.from('orders').select('*').eq('user_id',id).order('id',{ascending:false}).limit(30)]);
   $('#ad').innerHTML=`<button class="sm" onclick="aCli()" style="margin:12px 0">← Clientes</button><div class="card"><h3>${esc(p.name)}</h3><p class="mu">${esc(p.email)} · ${esc(p.phone)}</p>${p.verified?'':`<p>Código: <span class="code">${esc(c?.code)}</span></p>`}
-<label>Créditos ${p.role==='admin'?'(admin: infinitos)':''}</label><div class="row"><input id="cc" type="number" step="any" value="${p.credits}" style="flex:1"><button class="sm ok" onclick="upP('${id}',{credits:+$('#cc').value})">Guardar</button></div>
+<label>Créditos</label><div class="row"><input id="cc" type="number" step="any" value="${p.credits}" style="flex:1"><button class="sm ok" onclick="upP('${id}',{credits:+$('#cc').value})">Guardar</button></div>
 <div class="row" style="margin-top:12px">${p.verified?'':`<a href="https://wa.me/${encodeURIComponent((p.phone||'').replace(/\D/g,''))}?text=${encodeURIComponent('Tu código de NEXORA TOPUP es '+(c?.code||''))}" target="_blank" rel="noopener"><button class="sm ok">Enviar código</button></a><button class="sm" onclick="upP('${id}',{verified:true})">Verificar sin código</button>`}
 ${p.id===me.id?'':`<button class="sm" onclick="if(confirm('¿Cambiar rol?'))upP('${id}',{role:'${p.role==='admin'?'user':'admin'}',verified:true})">${p.role==='admin'?'Quitar admin':'Hacer admin'}</button><button class="sm bad" onclick="upP('${id}',{banned:${!p.banned}})">${p.banned?'Quitar baneo':'Banear cliente'}</button>`}</div></div>
 <div class="card"><label>Enviar mensaje</label><input id="mm" placeholder="Mensaje para el cliente"><button class="btn" onclick="sendM('${id}')">Enviar mensaje</button></div><h2>Pedidos del cliente</h2>${(os||[]).map(o=>orderRow(o,true)).join('')||'<p class="mu">Sin pedidos.</p>'}`}
 async function upP(id,v){const{error}=await sb.from('profiles').update(v).eq('id',id);if(error)return toast(error.message);toast('Listo');aCliD(id)}
 async function sendM(id){const t=$('#mm').value.trim();if(!t)return;const{error}=await sb.from('notifications').insert({user_id:id,title:'Mensaje del soporte',body:t});toast(error?error.message:'Mensaje enviado');$('#mm').value=''}
+async function aCred(){const f=(i,b,c)=>`<div class="card"><input id="ce${i}" type="email" placeholder="Correo del cliente"><input id="cq${i}" type="number" step="any" placeholder="Cantidad de créditos" style="margin-top:8px"><button class="btn" style="${c}" onclick="admCr(${b})">${b>0?'Enviar':'Quitar'}</button></div>`;
+  $('#ad').innerHTML=`<div class="card" style="background:linear-gradient(135deg,#4f46e5,#9333ea);margin-top:12px"><span>Tu billetera de admin</span><h1 style="font-size:44px">∞ créditos</h1></div><h2>Enviar créditos</h2>${f(1,1,'')}<h2>Quitar créditos</h2>${f(2,-1,'background:var(--bad);box-shadow:none')}`}
+async function admCr(sg){const i=sg>0?1:2,e=$('#ce'+i).value.trim().toLowerCase(),q=+$('#cq'+i).value;if(!e||!(q>0))return toast('Completa correo y cantidad');
+  const{error}=await sb.rpc('admin_add_credits',{p_email:e,p_qty:q*sg});toast(error?error.message:'Listo');if(!error){$('#ce'+i).value='';$('#cq'+i).value=''}}
+async function aAv(){const{data}=await sb.from('notifications').select('*').eq('user_id',me.id).eq('scope','admin').order('id',{ascending:false}).limit(50);
+  $('#ad').innerHTML=(data||[]).map(n=>`<div class="card" ${n.read?'':'style="border-color:#d946ef"'}><b>${esc(n.title)}</b><p>${esc(n.body)}</p><span class="mu">${new Date(n.created_at).toLocaleString('es')}</span></div>`).join('')||'<p class="mu" style="margin-top:12px">Sin avisos de admin.</p>';
+  sb.from('notifications').update({read:true}).eq('user_id',me.id).eq('scope','admin').eq('read',false).then(()=>{})}
 async function aPed(){const{data}=await sb.from('orders').select('*,profiles(name,email)').order('id',{ascending:false}).limit(100);
   $('#ad').innerHTML=(data||[]).map(o=>orderRow(o,true)).join('')||'<p class="mu">Sin pedidos todavía.</p>'}
 async function aOf(){const{data}=await sb.from('offers').select('*').order('sort').order('id');
